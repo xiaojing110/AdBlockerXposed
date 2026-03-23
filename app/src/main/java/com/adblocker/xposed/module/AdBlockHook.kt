@@ -36,10 +36,12 @@ class AdBlockHook : IXposedHookLoadPackage {
         @Volatile
         private var captureSelectedPackages: Set<String> = emptySet()
 
-        // Packages to skip
+        // Packages to skip (DO NOT include "android" — needed for system framework hooks)
         private val SKIP_PACKAGES = setOf(
-            "android", "com.android.systemui", "com.adblocker.xposed",
-            "com.topjohnwu.magisk", "io.github.lsposed.manager",
+            "com.adblocker.xposed",
+            "com.android.systemui",
+            "com.topjohnwu.magisk",
+            "io.github.lsposed.manager",
             "org.lsposed.manager"
         )
 
@@ -61,9 +63,8 @@ class AdBlockHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val packageName = lpparam.packageName
 
-        // Skip system packages and ourselves
+        // Skip only specific problematic packages
         if (SKIP_PACKAGES.contains(packageName)) return
-        if (packageName.startsWith("com.android.")) return
 
         // Reload config (try to get current app context, skip if unavailable)
         try {
@@ -72,9 +73,15 @@ class AdBlockHook : IXposedHookLoadPackage {
         } catch (_: Throwable) {}
 
         try {
+            // System framework (android) gets DNS + HTTP hooks for system-wide blocking
+            // All other apps get full hooks including WebView
             hookNetworkCalls(lpparam)
             hookDnsResolution(lpparam)
-            hookWebView(lpparam)
+
+            // WebView hooks only for non-system packages
+            if (packageName != "android" && packageName != "com.android.systemui") {
+                hookWebView(lpparam)
+            }
         } catch (t: Throwable) {
             XposedBridge.log("$TAG: Error hooking $packageName: ${t.message}")
         }

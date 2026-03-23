@@ -1,2 +1,1 @@
 com.adblocker.xposed.module.AdBlockHook
-com.adblocker.xposed.hook.HttpInterceptor

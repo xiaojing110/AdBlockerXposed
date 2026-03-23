@@ -44,6 +44,11 @@
             android:name="xposedinitclass"
             android:value="com.adblocker.xposed.module.AdBlockHook" />
 
+        <!-- Xposed Scope: declare system framework + all apps for ad blocking -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
         <!-- Boot Receiver -->
         <receiver
             android:name=".receiver.BootReceiver"

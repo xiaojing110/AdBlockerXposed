@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Xposed module scope: pre-select system framework for system-wide ad blocking -->
+    <array name="xposed_scope">
+        <item>android</item>
+    </array>
+</resources>

@@ -46,9 +46,17 @@ class SettingsFragment : Fragment() {
         binding.tvVersion.text = "v1.0.0"
         binding.tvApiLevel.text = "LSPosed API 93"
 
-        // Check LSPosed status
-        val lspActive = checkLSPosedStatus()
-        binding.tvLspStatus.text = if (lspActive) "✅ 已激活" else "❌ 未激活"
+        // Check LSPosed status (async via root)
+        binding.tvLspStatus.text = "检查中..."
+        viewLifecycleOwner.lifecycleScope.launch {
+            val (status, detail) = checkLSPosedStatusDetailed()
+            binding.tvLspStatus.text = status
+            if (detail.isNotEmpty()) {
+                binding.tvLspStatus.setOnClickListener {
+                    showMsg(detail)
+                }
+            }
+        }
     }
 
     private fun setupActions() {
@@ -126,68 +134,124 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private fun checkLSPosedStatus(): Boolean {
-        // Method 1: Check if XposedBridge is accessible (works inside hook context)
+    /**
+     * Detailed LSPosed status check.
+     * Returns (displayText, detailMessage).
+     *
+     * Checks in order:
+     * 1. XposedBridge version (works in hook context)
+     * 2. LSPosed config files via root (module enabled + scope)
+     * 3. hook_activated flag (set by AdBlockHook when it runs)
+     * 4. LSPosed Manager installed?
+     */
+    private suspend fun checkLSPosedStatusDetailed(): Pair<String, String> = withContext(Dispatchers.IO) {
+        // Method 1: XposedBridge directly (only works inside hooked process)
         try {
             val bridge = Class.forName("de.robv.android.xposed.XposedBridge")
             val getXposedVersion = bridge.getDeclaredMethod("getXposedVersion")
             getXposedVersion.isAccessible = true
-            val version = getXposedVersion.invoke(null)
-            if (version != null && (version as Int) > 0) return true
+            val version = getXposedVersion.invoke(null) as? Int
+            if (version != null && version > 0) {
+                return@withContext Pair("✅ 已激活 (Xposed API $version)", "")
+            }
         } catch (_: Throwable) {}
 
-        // Method 2: Check LSPosed Manager process via system property
+        // Method 2: Read LSPosed config via root shell
         try {
-            val process = Runtime.getRuntime().exec(arrayOf("getprop", "ro.dalvik.vm.isa"))
-            val reader = process.inputStream.bufferedReader()
-            val line = reader.readText().trim()
-            reader.close()
-            process.waitFor()
-            // LSPosed sets specific properties
-            if (line.isNotEmpty()) { /* at least system responds */ }
+            val myPkg = requireContext().packageName
+            // LSPosed config paths (v1.9.x+)
+            val configPaths = listOf(
+                "/data/adb/lspd/config/modules_config.json",
+                "/data/adb/lspd/config_manager/modules_config.json"
+            )
+
+            for (configPath in configPaths) {
+                val output = execSu("cat $configPath 2>/dev/null")
+                if (output.isNotEmpty()) {
+                    // Parse JSON to check if our module is enabled and has scope
+                    val jsonStr = output.trim()
+                    // Check if our package is in the modules config
+                    if (jsonStr.contains(myPkg)) {
+                        // Check if android (system framework) is in scope
+                        val hasSystemScope = jsonStr.contains("\"android\"")
+                        val hasScope = jsonStr.contains("\"scope\"") &&
+                            (jsonStr.contains("\"scope\": []") || // empty = all apps
+                             jsonStr.contains("\"$myPkg\""))      // or contains our pkg
+
+                        if (hasSystemScope) {
+                            return@withContext Pair("✅ 已激活 (含系统框架)", "")
+                        } else {
+                            return@withContext Pair(
+                                "⚠️ 已激活 (未含系统框架)",
+                                "请在LSPosed Manager中勾选 android(系统框架)"
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Also check legacy path
+            val legacyOutput = execSu("cat /data/adb/modules/*/lspd/config/modules.list 2>/dev/null")
+            if (legacyOutput.contains(requireContext().packageName)) {
+                return@withContext Pair("✅ 已激活", "")
+            }
         } catch (_: Throwable) {}
 
-        // Method 3: Check if LSPosed Manager is installed and module is enabled
+        // Method 3: Check hook_activated flag (set by AdBlockHook when it runs)
+        try {
+            val prefs = requireContext().getSharedPreferences("adblocker_prefs", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("hook_activated", false)) {
+                return@withContext Pair("✅ 已激活", "")
+            }
+        } catch (_: Throwable) {}
+
+        // Method 4: Check if LSPosed Manager is installed
         try {
             val pm = requireContext().packageManager
-            // Try LSPosed Manager package names
-            val lspPackages = listOf(
-                "io.github.lsposed.manager",
-                "org.lsposed.manager",
-                "com.topjohnwu.magisk" // Magisk often co-located with LSPosed
-            )
-            for (pkg in lspPackages) {
+            val lspPkgs = listOf("io.github.lsposed.manager", "org.lsposed.manager")
+            for (pkg in lspPkgs) {
                 try {
                     pm.getPackageInfo(pkg, 0)
-                    // LSPosed Manager is installed, check if our module is enabled
-                    // via shared prefs set by Xposed hook
-                    val prefs = requireContext().getSharedPreferences("adblocker_prefs", Context.MODE_PRIVATE)
-                    val hookActive = prefs.getBoolean("hook_activated", false)
-                    if (hookActive) return true
+                    // LSPosed Manager installed but module not detected
+                    return@withContext Pair(
+                        "❌ 未激活",
+                        "请在LSPosed Manager中启用模块并勾选作用域"
+                    )
                 } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {}
 
-        // Method 4: Check via intent query for LSPosed services
+        // Method 5: Check if LSPosed framework directory exists
         try {
-            val intent = android.content.Intent("org.lsposed.manager.HOOK_STATUS")
-            val pm = requireContext().packageManager
-            val resolveInfo = pm.queryIntentActivities(intent, 0)
-            if (resolveInfo.isNotEmpty()) return true
-        } catch (_: Throwable) {}
-
-        // Method 5: Check /data/adb/lspd directory (requires root, may not work)
-        try {
-            val lspDir = java.io.File("/data/adb/lspd")
-            if (lspDir.exists()) {
-                // LSPosed framework directory exists
-                val prefs = requireContext().getSharedPreferences("adblocker_prefs", Context.MODE_PRIVATE)
-                // If we've been running for >30 seconds without crash, likely active
-                val uptime = android.os.SystemClock.elapsedRealtime()
-                if (uptime > 30000) return true
+            val lspExists = execSu("test -d /data/adb/lspd && echo yes").trim()
+            if (lspExists == "yes") {
+                return@withContext Pair(
+                    "❌ 未激活",
+                    "LSPosed框架已安装，请在Manager中启用本模块"
+                )
             }
         } catch (_: Throwable) {}
 
+        return@withContext Pair("❌ 未激活", "请安装LSPosed框架")
+    }
+
+    /**
+     * Execute a shell command with su (root).
+     * Returns stdout output, or empty string on failure.
+     */
+    private fun execSu(cmd: String): String {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            output
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    @Deprecated("Use checkLSPosedStatusDetailed instead")
+    private fun checkLSPosedStatus(): Boolean {
         return false
     }
 
