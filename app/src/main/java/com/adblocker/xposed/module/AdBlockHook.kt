@@ -129,8 +129,8 @@ class AdBlockHook : IXposedHookLoadPackage {
                                     logCapture(lpparam.packageName, urlStr, host, "OkHttp")
                                 }
                             }
-                        } catch (_: IOException) {
-                            throw
+                        } catch (e: IOException) {
+                            throw e
                         } catch (_: Throwable) {}
                     }
                 }
@@ -167,8 +167,8 @@ class AdBlockHook : IXposedHookLoadPackage {
                                         incrementHit(host)
                                         throw IOException("Ad blocked by AdBlockerXposed: $host")
                                     }
-                                } catch (_: IOException) {
-                                    throw
+                                } catch (e: IOException) {
+                                    throw e
                                 } catch (_: Throwable) {}
                             }
                         }
