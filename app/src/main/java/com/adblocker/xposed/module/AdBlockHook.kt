@@ -321,15 +321,29 @@ class AdBlockHook : IXposedHookLoadPackage {
         } catch (_: Throwable) {}
     }
 
-    private fun logCapture(packageName: String, url: String, host: String, method: String) {
-        // Store capture data via shared prefs for the app to read
+    private fun logCapture(packageName: String, url: String, host: String, method: String, blocked: Boolean = false) {
         try {
             val context = AndroidAppHelper.currentApplication()
-            val prefs = context.getSharedPreferences("adblocker_capture", Context.MODE_PRIVATE)
-            val timestamp = System.currentTimeMillis()
-            val key = "cap_${timestamp}_${host.hashCode()}"
-            val data = "$packageName|$url|$host|$method|$timestamp"
-            prefs.edit().putString(key, data).apply()
+
+            // Push to floating window if it's running
+            try {
+                val intent = android.content.Intent().apply {
+                    setClassName(context, "com.adblocker.xposed.service.FloatingCaptureService")
+                    action = "action_add_capture"
+                    putExtra("extra_host", host)
+                    putExtra("extra_url", url)
+                    putExtra("extra_package", packageName)
+                    putExtra("extra_blocked", blocked)
+                }
+                context.startService(intent)
+            } catch (_: Throwable) {
+                // Floating service not running, just save to prefs
+                val prefs = context.getSharedPreferences("adblocker_capture", Context.MODE_PRIVATE)
+                val timestamp = System.currentTimeMillis()
+                val key = "cap_${timestamp}_${host.hashCode()}"
+                val data = "$packageName|$url|$host|$method|$timestamp"
+                prefs.edit().putString(key, data).apply()
+            }
         } catch (_: Throwable) {}
     }
 }

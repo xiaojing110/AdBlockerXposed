@@ -1,7 +1,9 @@
 package com.adblocker.xposed.ui.fragment
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -12,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.adblocker.xposed.App
 import com.adblocker.xposed.databinding.FragmentCaptureBinding
+import com.adblocker.xposed.service.FloatingCaptureService
 import com.adblocker.xposed.ui.adapter.CaptureAdapter
 import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +89,33 @@ class CaptureFragment : Fragment() {
                 }
                 adapter.submitList(emptyList())
             }
+        }
+
+        // Floating window toggle
+        updateFloatingBtn()
+        binding.btnFloatingCapture.setOnClickListener {
+            if (FloatingCaptureService.isRunning()) {
+                val intent = Intent(requireContext(), FloatingCaptureService::class.java)
+                requireContext().stopService(intent)
+                android.widget.Toast.makeText(requireContext(), "浮窗已关闭", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                val intent = Intent(requireContext(), FloatingCaptureService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    requireContext().startForegroundService(intent)
+                } else {
+                    requireContext().startService(intent)
+                }
+                android.widget.Toast.makeText(requireContext(), "浮窗已开启", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            updateFloatingBtn()
+        }
+    }
+
+    private fun updateFloatingBtn() {
+        if (FloatingCaptureService.isRunning()) {
+            binding.btnFloatingCapture.text = "🔴 关闭浮窗"
+        } else {
+            binding.btnFloatingCapture.text = "📡 开启浮窗"
         }
     }
 

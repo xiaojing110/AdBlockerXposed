@@ -2,16 +2,21 @@ package com.adblocker.xposed.ui.fragment
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.adblocker.xposed.App
 import com.adblocker.xposed.R
 import com.adblocker.xposed.databinding.FragmentHomeBinding
 import com.adblocker.xposed.service.AdBlockService
+import com.adblocker.xposed.service.FloatingCaptureService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,6 +27,19 @@ class HomeFragment : Fragment() {
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
+
+    /** Request overlay permission result */
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // After returning from settings, check if permission granted
+        if (Settings.canDrawOverlays(requireContext())) {
+            startFloatingCapture()
+        } else {
+            binding.switchCapture.isChecked = false
+            showMsg("需要悬浮窗权限才能显示抓包浮窗")
+        }
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
@@ -57,12 +75,48 @@ class HomeFragment : Fragment() {
             quickScan()
         }
 
-        // Capture toggle
+        // Capture toggle — starts/stops floating window
         val captureEnabled = prefs.getBoolean(App.KEY_CAPTURE_ENABLED, false)
+                && FloatingCaptureService.isRunning()
         binding.switchCapture.isChecked = captureEnabled
         binding.switchCapture.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(App.KEY_CAPTURE_ENABLED, isChecked).apply()
+            if (isChecked) {
+                // Check overlay permission first
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(requireContext())) {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${requireContext().packageName}")
+                    )
+                    overlayPermissionLauncher.launch(intent)
+                    return@setOnCheckedChangeListener
+                }
+                startFloatingCapture()
+            } else {
+                stopFloatingCapture()
+            }
         }
+    }
+
+    private fun startFloatingCapture() {
+        val prefs = requireContext().getSharedPreferences(App.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(App.KEY_CAPTURE_ENABLED, true).apply()
+
+        val intent = Intent(requireContext(), FloatingCaptureService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            requireContext().startForegroundService(intent)
+        } else {
+            requireContext().startService(intent)
+        }
+        showMsg("抓包浮窗已开启")
+    }
+
+    private fun stopFloatingCapture() {
+        val prefs = requireContext().getSharedPreferences(App.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(App.KEY_CAPTURE_ENABLED, false).apply()
+
+        val intent = Intent(requireContext(), FloatingCaptureService::class.java)
+        requireContext().stopService(intent)
+        showMsg("抓包浮窗已关闭")
     }
 
     private fun updateStatusCard(enabled: Boolean) {
@@ -120,7 +174,6 @@ class HomeFragment : Fragment() {
         val url = prefs.getString(App.KEY_MOSDNS_URL, "") ?: ""
 
         if (url.isEmpty()) {
-            // Use default anti-AD rules
             val intent = Intent(requireContext(), AdBlockService::class.java).apply {
                 action = AdBlockService.ACTION_IMPORT_RULES
                 putExtra(AdBlockService.EXTRA_URL,
@@ -140,10 +193,16 @@ class HomeFragment : Fragment() {
 
     private fun quickScan() {
         val pm = requireContext().packageManager
+        // Only scan user-installed apps with launcher intent (skip system apps for speed)
         val packages = pm.getInstalledApplications(0)
-            .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
+            .filter {
+                (it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 &&
+                pm.getLaunchIntentForPackage(it.packageName) != null
+            }
             .map { it.packageName }
             .toTypedArray()
+
+        showMsg("开始扫描 ${packages.size} 个应用...")
 
         val intent = Intent(requireContext(), AdBlockService::class.java).apply {
             action = AdBlockService.ACTION_SCAN
@@ -152,8 +211,13 @@ class HomeFragment : Fragment() {
         requireContext().startForegroundService(intent)
     }
 
+    private fun showMsg(msg: String) {
+        android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
     }
 }
+
