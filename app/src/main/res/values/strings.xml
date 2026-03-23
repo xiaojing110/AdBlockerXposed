@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AdBlocker Xposed</string>
+    <string name="tab_home">首页</string>
+    <string name="tab_scanner">扫描</string>
+    <string name="tab_capture">抓包</string>
+    <string name="tab_rules">规则</string>
+    <string name="tab_settings">设置</string>
+</resources>

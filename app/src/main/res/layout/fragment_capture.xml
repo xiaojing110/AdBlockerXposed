@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_primary">
+
+    <!-- Search -->
+    <androidx.appcompat.widget.SearchView
+        android:id="@+id/search_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="8dp"
+        app:queryHint="搜索URL或域名..."
+        app:iconifiedByDefault="false" />
+
+    <!-- Filters -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:gravity="center_vertical">
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_all"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="全部"
+            app:chipStyle="@style/Widget.MaterialComponents.Chip.Choice"
+            android:checked="true" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_blocked"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="仅已拦截"
+            app:chipStyle="@style/Widget.MaterialComponents.Chip.Choice"
+            android:layout_marginStart="8dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="清除"
+            android:textAllCaps="false"
+            android:textColor="@color/blocked_color" />
+
+    </LinearLayout>
+
+    <!-- Package Filter -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:paddingHorizontal="8dp">
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/chip_group_packages"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+    </HorizontalScrollView>
+
+    <!-- Count -->
+    <TextView
+        android:id="@+id/tv_capture_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="共 0 条记录"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        android:paddingHorizontal="16dp"
+        android:layout_marginVertical="4dp" />
+
+    <!-- Capture List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_capture"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="72dp" />
+
+</LinearLayout>
