@@ -121,7 +121,7 @@ interface ScanResultDao {
     fun getResultsByPackage(pkg: String): LiveData<List<ScanResult>>
 
     @Query("SELECT DISTINCT packageName, appName FROM scan_results ORDER BY appName")
-    fun getScannedApps(): LiveData<List<ScanResult>>
+    fun getScannedApps(): LiveData<List<ScannedApp>>
 
     @Insert
     suspend fun insert(result: ScanResult): Long

@@ -50,3 +50,8 @@ data class ScanResult(
     val adSdk: String,
     val scanTime: Long = System.currentTimeMillis()
 )
+
+data class ScannedApp(
+    val packageName: String,
+    val appName: String
+)
