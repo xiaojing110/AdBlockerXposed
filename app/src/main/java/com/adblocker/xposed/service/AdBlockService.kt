@@ -12,6 +12,8 @@ import com.adblocker.xposed.R
 import com.adblocker.xposed.data.model.ScanResult
 import com.adblocker.xposed.data.repository.AdRuleRepository
 import com.adblocker.xposed.ui.MainActivity
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import kotlinx.coroutines.*
 
 class AdBlockService : Service() {

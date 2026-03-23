@@ -9,8 +9,12 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import com.adblocker.xposed.App
 import com.adblocker.xposed.databinding.FragmentSettingsBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsFragment : Fragment() {
 
@@ -132,32 +136,27 @@ class SettingsFragment : Fragment() {
     }
 
     private fun exportRules() {
-        viewLifecycleOwner.lifecycleScope?.launch {
-            val rules = androidx.lifecycle.lifecycleScope.let {
-                // Export as hosts format
-                val sb = StringBuilder()
-                sb.AppendLine("# AdBlocker Xposed Rules Export")
-                sb.AppendLine("# Generated: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date())}")
-                sb.AppendLine()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val sb = StringBuilder()
+            sb.appendLine("# AdBlocker Xposed Rules Export")
+            sb.appendLine("# Generated: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date())}")
+            sb.appendLine()
 
-                // Get rules from database
-                val dao = App.instance.database.adRuleDao()
-                val rulesList = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    dao.getEnabledRulesSync()
-                }
-
-                rulesList.forEach { rule ->
-                    sb.AppendLine("0.0.0.0 ${rule.domain}")
-                }
-
-                // Save to file
-                val file = java.io.File(
-                    requireContext().getExternalFilesDir(null),
-                    "adblocker_rules_${System.currentTimeMillis()}.txt"
-                )
-                file.writeText(sb.toString())
-                showMsg("规则已导出到: ${file.absolutePath}")
+            val dao = App.instance.database.adRuleDao()
+            val rulesList = withContext(Dispatchers.IO) {
+                dao.getEnabledRulesSync()
             }
+
+            rulesList.forEach { rule ->
+                sb.appendLine("0.0.0.0 ${rule.domain}")
+            }
+
+            val file = java.io.File(
+                requireContext().getExternalFilesDir(null),
+                "adblocker_rules_${System.currentTimeMillis()}.txt"
+            )
+            file.writeText(sb.toString())
+            showMsg("规则已导出到: ${file.absolutePath}")
         }
     }
 
@@ -178,26 +177,28 @@ class SettingsFragment : Fragment() {
             .setPositiveButton("导入") { _, _ ->
                 val content = input.text.toString()
                 if (content.isNotEmpty()) {
-                    viewLifecycleOwner.lifecycleScope?.launch {
+                    viewLifecycleOwner.lifecycleScope.launch {
                         val lines = content.lines()
                         var count = 0
-                        lines.forEach { line ->
-                            val trimmed = line.trim()
-                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                                val domain = when {
-                                    trimmed.startsWith("0.0.0.0") -> trimmed.split("\\s+".toRegex()).getOrNull(1)
-                                    trimmed.startsWith("||") -> trimmed.removePrefix("||").removeSuffix("^")
-                                    else -> trimmed
-                                }
-                                if (domain != null && domain.contains(".")) {
-                                    App.instance.repository.insert(
-                                        com.adblocker.xposed.data.model.AdRule(
-                                            domain = domain.lowercase(),
-                                            source = "import",
-                                            ruleType = "domain"
+                        withContext(Dispatchers.IO) {
+                            lines.forEach { line ->
+                                val trimmed = line.trim()
+                                if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                                    val domain = when {
+                                        trimmed.startsWith("0.0.0.0") -> trimmed.split("\\s+".toRegex()).getOrNull(1)
+                                        trimmed.startsWith("||") -> trimmed.removePrefix("||").removeSuffix("^")
+                                        else -> trimmed
+                                    }
+                                    if (domain != null && domain.contains(".")) {
+                                        App.instance.repository.insert(
+                                            com.adblocker.xposed.data.model.AdRule(
+                                                domain = domain.lowercase(),
+                                                source = "import",
+                                                ruleType = "domain"
+                                            )
                                         )
-                                    )
-                                    count++
+                                        count++
+                                    }
                                 }
                             }
                         }
@@ -210,8 +211,8 @@ class SettingsFragment : Fragment() {
     }
 
     private fun clearAllData() {
-        viewLifecycleOwner.lifecycleScope?.launch {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
                 val db = App.instance.database
                 db.adRuleDao().deleteBySource("manual")
                 db.adRuleDao().deleteBySource("scan")

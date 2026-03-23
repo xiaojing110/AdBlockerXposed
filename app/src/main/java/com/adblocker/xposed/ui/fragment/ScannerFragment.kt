@@ -59,7 +59,7 @@ class ScannerFragment : Fragment() {
         binding.searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?) = false
 
-            override fun onQueryTextChange(newText: String?): boolean {
+            override fun onQueryTextChange(newText: String?): Boolean {
                 filterApps(newText ?: "")
                 return true
             }

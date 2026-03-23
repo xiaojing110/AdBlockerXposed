@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.adblocker.xposed.App
 import com.adblocker.xposed.databinding.FragmentCaptureBinding
 import com.adblocker.xposed.ui.adapter.CaptureAdapter
+import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -105,7 +106,7 @@ class CaptureFragment : Fragment() {
         // Simple package filter using chip group
         binding.chipGroupPackages.removeAllViews()
 
-        val allChip = android.widget.Chip(requireContext()).apply {
+        val allChip = Chip(requireContext()).apply {
             text = "全部"
             isCheckable = true
             isChecked = selectedPackage == null
@@ -119,7 +120,7 @@ class CaptureFragment : Fragment() {
         binding.chipGroupPackages.addView(allChip)
 
         packages.take(10).forEach { pkg ->
-            val chip = android.widget.Chip(requireContext()).apply {
+            val chip = Chip(requireContext()).apply {
                 text = pkg.substringAfterLast(".")
                 isCheckable = true
                 isChecked = pkg == selectedPackage
