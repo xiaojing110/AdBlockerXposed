@@ -12,8 +12,6 @@ import com.adblocker.xposed.R
 import com.adblocker.xposed.data.model.ScanResult
 import com.adblocker.xposed.data.repository.AdRuleRepository
 import com.adblocker.xposed.ui.MainActivity
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import kotlinx.coroutines.*
 
 class AdBlockService : Service() {
@@ -130,41 +128,67 @@ class AdBlockService : Service() {
 
             if (!apkFile.exists()) return results
 
-            // Scan DEX file for ad network strings
-            val process = Runtime.getRuntime().exec(
-                arrayOf("strings", appDir)
-            )
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
-
             val foundDomains = mutableSetOf<String>()
 
-            while (reader.readLine().also { line = it } != null) {
-                val content = line ?: continue
-                for (pattern in patterns) {
-                    if (content.contains(pattern, ignoreCase = true)) {
-                        // Extract the domain
-                        val domainMatch = Regex("([a-zA-Z0-9.-]+\\.${Regex.escape(pattern.split(".").takeLast(2).joinToString("."))})")
-                            .find(content)
-                        val domain = domainMatch?.value ?: pattern
-
-                        if (!foundDomains.contains(domain)) {
-                            foundDomains.add(domain)
-
-                            val sdk = identifyAdSdk(domain)
-                            results.add(ScanResult(
-                                packageName = packageName,
-                                appName = appName,
-                                adDomain = domain,
-                                adSdk = sdk
-                            ))
+            // Scan APK file binary data for ad network patterns (replaces `strings` command)
+            try {
+                val minLen = 8
+                val buffer = ByteArray(1024 * 1024) // 1MB read buffer
+                apkFile.inputStream().buffered().use { fis ->
+                    var bytesRead: Int
+                    while (fis.read(buffer).also { bytesRead = it } > 0) {
+                        // Extract printable ASCII sequences like `strings` command
+                        val sb = StringBuilder()
+                        for (i in 0 until bytesRead) {
+                            val b = buffer[i].toInt() and 0xFF
+                            if (b in 0x20..0x7E) {
+                                sb.append(b.toChar())
+                            } else {
+                                if (sb.length >= minLen) {
+                                    val line = sb.toString()
+                                    for (pattern in patterns) {
+                                        if (line.contains(pattern, ignoreCase = true)) {
+                                            val domainMatch = Regex("([a-zA-Z0-9.-]+\\.${Regex.escape(pattern.split(".").takeLast(2).joinToString("."))})")
+                                                .find(line)
+                                            val domain = domainMatch?.value ?: pattern
+                                            if (foundDomains.add(domain)) {
+                                                val sdk = identifyAdSdk(domain)
+                                                results.add(ScanResult(
+                                                    packageName = packageName,
+                                                    appName = appName,
+                                                    adDomain = domain,
+                                                    adSdk = sdk
+                                                ))
+                                            }
+                                        }
+                                    }
+                                }
+                                sb.clear()
+                            }
+                        }
+                        // Handle trailing sequence
+                        if (sb.length >= minLen) {
+                            val line = sb.toString()
+                            for (pattern in patterns) {
+                                if (line.contains(pattern, ignoreCase = true)) {
+                                    val domainMatch = Regex("([a-zA-Z0-9.-]+\\.${Regex.escape(pattern.split(".").takeLast(2).joinToString("."))})")
+                                        .find(line)
+                                    val domain = domainMatch?.value ?: pattern
+                                    if (foundDomains.add(domain)) {
+                                        val sdk = identifyAdSdk(domain)
+                                        results.add(ScanResult(
+                                            packageName = packageName,
+                                            appName = appName,
+                                            adDomain = domain,
+                                            adSdk = sdk
+                                        ))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-            }
-
-            process.waitFor()
-            reader.close()
+            } catch (_: Exception) {}
 
             // Also check lib directory for known SDK libraries
             val libDir = java.io.File(appInfo.nativeLibraryDir ?: "")
