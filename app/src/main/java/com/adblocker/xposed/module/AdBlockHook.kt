@@ -32,10 +32,15 @@ class AdBlockHook : IXposedHookLoadPackage {
         @Volatile
         private var keywords: List<String> = emptyList()
 
+        /** Per-app capture selection: if empty, capture all; if non-empty, only capture these */
+        @Volatile
+        private var captureSelectedPackages: Set<String> = emptySet()
+
         // Packages to skip
         private val SKIP_PACKAGES = setOf(
             "android", "com.android.systemui", "com.adblocker.xposed",
-            "com.topjohnwu.magisk", "io.github.lsposed.manager"
+            "com.topjohnwu.magisk", "io.github.lsposed.manager",
+            "org.lsposed.manager"
         )
 
         fun reloadConfig(context: Context) {
@@ -45,6 +50,10 @@ class AdBlockHook : IXposedHookLoadPackage {
                 captureEnabled = prefs.getBoolean("capture_enabled", false)
                 val kw = prefs.getString("keywords", "") ?: ""
                 keywords = kw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                captureSelectedPackages = prefs.getStringSet("capture_selected_packages", emptySet()) ?: emptySet()
+
+                // Mark hook as activated so SettingsFragment can detect LSPosed status
+                prefs.edit().putBoolean("hook_activated", true).apply()
             } catch (_: Throwable) {}
         }
     }
@@ -56,6 +65,12 @@ class AdBlockHook : IXposedHookLoadPackage {
         if (SKIP_PACKAGES.contains(packageName)) return
         if (packageName.startsWith("com.android.")) return
 
+        // Reload config (try to get current app context, skip if unavailable)
+        try {
+            val app = AndroidAppHelper.currentApplication()
+            if (app != null) reloadConfig(app)
+        } catch (_: Throwable) {}
+
         try {
             hookNetworkCalls(lpparam)
             hookDnsResolution(lpparam)
@@ -66,9 +81,26 @@ class AdBlockHook : IXposedHookLoadPackage {
     }
 
     /**
+     * Check if capture should happen for this package.
+     * If captureSelectedPackages is empty → capture all.
+     * If non-empty → only capture the selected packages.
+     */
+    private fun shouldCapture(packageName: String): Boolean {
+        if (!captureEnabled) return false
+        if (captureSelectedPackages.isEmpty()) return true // empty = capture all
+        return captureSelectedPackages.contains(packageName)
+    }
+
+    /**
      * Hook HttpURLConnection and OkHttp network calls
      */
     private fun hookNetworkCalls(lpparam: XC_LoadPackage.LoadPackageParam) {
+        // Periodically reload config to stay in sync with UI changes
+        try {
+            val app = AndroidAppHelper.currentApplication()
+            if (app != null) reloadConfig(app)
+        } catch (_: Throwable) {}
+
         // Hook HttpURLConnection
         try {
             XposedHelpers.findAndHookConstructor(
@@ -86,7 +118,7 @@ class AdBlockHook : IXposedHookLoadPackage {
                             throw IOException("Ad blocked by AdBlockerXposed: $host")
                         }
 
-                        if (captureEnabled) {
+                        if (shouldCapture(lpparam.packageName)) {
                             logCapture(lpparam.packageName, url.toString(), host, "GET")
                         }
                     }
@@ -125,7 +157,7 @@ class AdBlockHook : IXposedHookLoadPackage {
                                     throw IOException("Ad blocked by AdBlockerXposed: $host")
                                 }
 
-                                if (captureEnabled && host.isNotEmpty()) {
+                                if (shouldCapture(lpparam.packageName) && host.isNotEmpty()) {
                                     logCapture(lpparam.packageName, urlStr, host, "OkHttp")
                                 }
                             }

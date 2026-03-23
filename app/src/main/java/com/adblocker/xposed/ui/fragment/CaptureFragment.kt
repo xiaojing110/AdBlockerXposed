@@ -1,5 +1,7 @@
 package com.adblocker.xposed.ui.fragment
 
+import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -24,6 +26,9 @@ class CaptureFragment : Fragment() {
     private var showBlockedOnly = false
     private var selectedPackage: String? = null
 
+    /** Currently selected packages for capture (checked = capture this app) */
+    private val selectedCapturePackages = mutableSetOf<String>()
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentCaptureBinding.inflate(inflater, container, false)
         return binding.root
@@ -31,10 +36,24 @@ class CaptureFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        loadSelectedPackages()
         setupRecyclerView()
         setupFilters()
         setupSearch()
+        setupAppSelector()
         loadCaptureData()
+    }
+
+    private fun loadSelectedPackages() {
+        val prefs = requireContext().getSharedPreferences(App.PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = prefs.getStringSet("capture_selected_packages", emptySet()) ?: emptySet()
+        selectedCapturePackages.clear()
+        selectedCapturePackages.addAll(saved)
+    }
+
+    private fun saveSelectedPackages() {
+        val prefs = requireContext().getSharedPreferences(App.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putStringSet("capture_selected_packages", selectedCapturePackages).apply()
     }
 
     private fun setupRecyclerView() {
@@ -78,6 +97,94 @@ class CaptureFragment : Fragment() {
                 return true
             }
         })
+    }
+
+    /**
+     * Set up app selection button — shows a multi-select dialog for choosing
+     * which apps to capture traffic from.
+     */
+    private fun setupAppSelector() {
+        // Add "选择App" button listener
+        binding.btnSelectApps.setOnClickListener {
+            showAppSelectionDialog()
+        }
+
+        // Update the button text to show count
+        updateAppSelectorButton()
+    }
+
+    private fun updateAppSelectorButton() {
+        val count = selectedCapturePackages.size
+        binding.btnSelectApps.text = if (count > 0) {
+            "📱 选择App ($count 已选)"
+        } else {
+            "📱 选择App (全部)"
+        }
+    }
+
+    private fun showAppSelectionDialog() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val apps = withContext(Dispatchers.IO) {
+                val pm = requireContext().packageManager
+                pm.getInstalledApplications(0)
+                    .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
+                    .map { appInfo ->
+                        Triple(
+                            appInfo.packageName,
+                            pm.getApplicationLabel(appInfo).toString(),
+                            selectedCapturePackages.contains(appInfo.packageName)
+                        )
+                    }
+                    .sortedBy { it.second }
+            }
+
+            val packageNames = apps.map { it.first }.toTypedArray()
+            val displayNames = apps.map { "${it.second} (${it.first.substringAfterLast(".")})" }.toTypedArray()
+            val checkedItems = apps.map { it.third }.toBooleanArray()
+
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("📱 选择要抓包的App")
+                .setMultiChoiceItems(displayNames, checkedItems) { _, which, isChecked ->
+                    checkedItems[which] = isChecked
+                }
+                .setPositiveButton("确定") { _, _ ->
+                    selectedCapturePackages.clear()
+                    for (i in checkedItems.indices) {
+                        if (checkedItems[i]) {
+                            selectedCapturePackages.add(packageNames[i])
+                        }
+                    }
+                    saveSelectedPackages()
+                    updateAppSelectorButton()
+
+                    // Show message
+                    val msg = if (selectedCapturePackages.isEmpty()) {
+                        "已取消所有选择，将抓取全部App"
+                    } else {
+                        "已选择 ${selectedCapturePackages.size} 个App"
+                    }
+                    android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("取消", null)
+                .setNeutralButton("全选/取消") { _, _ ->
+                    val allSelected = checkedItems.all { it }
+                    for (i in checkedItems.indices) {
+                        checkedItems[i] = !allSelected
+                    }
+                    // Re-show dialog with toggled state
+                    selectedCapturePackages.clear()
+                    if (!allSelected) {
+                        for (i in checkedItems.indices) {
+                            selectedCapturePackages.add(packageNames[i])
+                        }
+                    }
+                    saveSelectedPackages()
+                    updateAppSelectorButton()
+                    val msg = if (allSelected) "已取消所有选择" else "已全选 ${selectedCapturePackages.size} 个App"
+                    android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                .show()
+        }
     }
 
     private fun loadCaptureData() {

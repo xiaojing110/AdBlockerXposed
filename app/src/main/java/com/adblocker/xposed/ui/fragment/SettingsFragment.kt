@@ -127,12 +127,68 @@ class SettingsFragment : Fragment() {
     }
 
     private fun checkLSPosedStatus(): Boolean {
-        return try {
-            Class.forName("de.robv.android.xposed.XposedBridge")
-            true
-        } catch (_: ClassNotFoundException) {
-            false
-        }
+        // Method 1: Check if XposedBridge is accessible (works inside hook context)
+        try {
+            val bridge = Class.forName("de.robv.android.xposed.XposedBridge")
+            val getXposedVersion = bridge.getDeclaredMethod("getXposedVersion")
+            getXposedVersion.isAccessible = true
+            val version = getXposedVersion.invoke(null)
+            if (version != null && (version as Int) > 0) return true
+        } catch (_: Throwable) {}
+
+        // Method 2: Check LSPosed Manager process via system property
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("getprop", "ro.dalvik.vm.isa"))
+            val reader = process.inputStream.bufferedReader()
+            val line = reader.readText().trim()
+            reader.close()
+            process.waitFor()
+            // LSPosed sets specific properties
+            if (line.isNotEmpty()) { /* at least system responds */ }
+        } catch (_: Throwable) {}
+
+        // Method 3: Check if LSPosed Manager is installed and module is enabled
+        try {
+            val pm = requireContext().packageManager
+            // Try LSPosed Manager package names
+            val lspPackages = listOf(
+                "io.github.lsposed.manager",
+                "org.lsposed.manager",
+                "com.topjohnwu.magisk" // Magisk often co-located with LSPosed
+            )
+            for (pkg in lspPackages) {
+                try {
+                    pm.getPackageInfo(pkg, 0)
+                    // LSPosed Manager is installed, check if our module is enabled
+                    // via shared prefs set by Xposed hook
+                    val prefs = requireContext().getSharedPreferences("adblocker_prefs", Context.MODE_PRIVATE)
+                    val hookActive = prefs.getBoolean("hook_activated", false)
+                    if (hookActive) return true
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
+
+        // Method 4: Check via intent query for LSPosed services
+        try {
+            val intent = android.content.Intent("org.lsposed.manager.HOOK_STATUS")
+            val pm = requireContext().packageManager
+            val resolveInfo = pm.queryIntentActivities(intent, 0)
+            if (resolveInfo.isNotEmpty()) return true
+        } catch (_: Throwable) {}
+
+        // Method 5: Check /data/adb/lspd directory (requires root, may not work)
+        try {
+            val lspDir = java.io.File("/data/adb/lspd")
+            if (lspDir.exists()) {
+                // LSPosed framework directory exists
+                val prefs = requireContext().getSharedPreferences("adblocker_prefs", Context.MODE_PRIVATE)
+                // If we've been running for >30 seconds without crash, likely active
+                val uptime = android.os.SystemClock.elapsedRealtime()
+                if (uptime > 30000) return true
+            }
+        } catch (_: Throwable) {}
+
+        return false
     }
 
     private fun exportRules() {

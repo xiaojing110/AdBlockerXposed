@@ -25,6 +25,11 @@ class ScannerFragment : Fragment() {
     private lateinit var adapter: AppScanAdapter
     private var allApps = listOf<AppInfo>()
 
+    /** Prevent repeated popup when LiveData fires multiple updates */
+    private var isShowingDetails = false
+    /** Debounce rapid clicks */
+    private var lastClickTime = 0L
+
     data class AppInfo(
         val packageName: String,
         val appName: String,
@@ -48,7 +53,15 @@ class ScannerFragment : Fragment() {
 
     private fun setupRecyclerView() {
         adapter = AppScanAdapter { appInfo ->
-            // Show ad domains for this app
+            // Debounce: ignore clicks within 500ms
+            val now = System.currentTimeMillis()
+            if (now - lastClickTime < 500) return@AppScanAdapter
+            lastClickTime = now
+
+            // Prevent repeated popups
+            if (isShowingDetails) return@AppScanAdapter
+            isShowingDetails = true
+
             showAppDetails(appInfo)
         }
         binding.recyclerApps.layoutManager = LinearLayoutManager(requireContext())
@@ -128,39 +141,65 @@ class ScannerFragment : Fragment() {
     }
 
     private fun showAppDetails(appInfo: AppInfo) {
-        // Show scan results for this app
+        // Show scan results for this app — use observeOnce to prevent repeated popups
         val scanDao = App.instance.database.scanResultDao()
-        scanDao.getResultsByPackage(appInfo.packageName).observe(viewLifecycleOwner) { results ->
-            val domains = results.joinToString("\n") { "• ${it.adDomain} (${it.adSdk})" }
-            if (domains.isNotEmpty()) {
-                android.app.AlertDialog.Builder(requireContext())
-                    .setTitle("${appInfo.appName}")
-                    .setMessage("检测到的广告域名:\n\n$domains")
-                    .setPositiveButton("添加到屏蔽列表") { _, _ ->
-                        viewLifecycleOwner.lifecycleScope.launch {
-                            val repo = App.instance.repository
-                            results.forEach { result ->
-                                repo.insert(
-                                    com.adblocker.xposed.data.model.AdRule(
-                                        domain = result.adDomain,
-                                        source = "scan",
-                                        packageName = result.packageName,
-                                        ruleType = "domain"
+
+        // One-shot observer: only fires once then removes itself
+        val liveData = scanDao.getResultsByPackage(appInfo.packageName)
+        var dialog: android.app.AlertDialog? = null
+
+        val observer = object : androidx.lifecycle.Observer<List<com.adblocker.xposed.data.model.ScanResult>> {
+            override fun onChanged(results: List<com.adblocker.xposed.data.model.ScanResult>) {
+                // Remove observer immediately to prevent re-firing
+                liveData.removeObserver(this)
+
+                val domains = results.joinToString("\n") { "• ${it.adDomain} (${it.adSdk})" }
+                if (domains.isNotEmpty()) {
+                    dialog = android.app.AlertDialog.Builder(requireContext())
+                        .setTitle("${appInfo.appName}")
+                        .setMessage("检测到的广告域名:\n\n$domains")
+                        .setPositiveButton("添加到屏蔽列表") { d, _ ->
+                            d.dismiss()
+                            isShowingDetails = false
+                            viewLifecycleOwner.lifecycleScope.launch {
+                                val repo = App.instance.repository
+                                results.forEach { result ->
+                                    repo.insert(
+                                        com.adblocker.xposed.data.model.AdRule(
+                                            domain = result.adDomain,
+                                            source = "scan",
+                                            packageName = result.packageName,
+                                            ruleType = "domain"
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
-                    }
-                    .setNegativeButton("关闭", null)
-                    .show()
-            } else {
-                android.app.AlertDialog.Builder(requireContext())
-                    .setTitle(appInfo.appName)
-                    .setMessage("未发现广告域名。请先点击\"扫描全部\"进行扫描。")
-                    .setPositiveButton("确定", null)
-                    .show()
+                        .setNegativeButton("关闭") { d, _ ->
+                            d.dismiss()
+                            isShowingDetails = false
+                        }
+                        .setOnDismissListener {
+                            isShowingDetails = false
+                        }
+                        .show()
+                } else {
+                    dialog = android.app.AlertDialog.Builder(requireContext())
+                        .setTitle(appInfo.appName)
+                        .setMessage("未发现广告域名。请先点击\"扫描全部\"进行扫描。")
+                        .setPositiveButton("确定") { d, _ ->
+                            d.dismiss()
+                            isShowingDetails = false
+                        }
+                        .setOnDismissListener {
+                            isShowingDetails = false
+                        }
+                        .show()
+                }
             }
         }
+
+        liveData.observe(viewLifecycleOwner, observer)
     }
 
     override fun onDestroyView() {
