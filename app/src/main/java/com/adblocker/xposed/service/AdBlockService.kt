@@ -318,7 +318,7 @@ class AdBlockService : Service() {
             var totalRead = 0
             val buffer = ByteArray(256 * 1024) // 256KB chunks
             apkFile.inputStream().buffered().use { fis ->
-                var bytesRead: Int
+                var bytesRead: Int = 0
                 while (totalRead < maxScanBytes && fis.read(buffer).also { bytesRead = it } > 0) {
                     totalRead += bytesRead
                     val sb = StringBuilder()

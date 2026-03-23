@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.*
+import kotlinx.coroutines.*
 import com.adblocker.xposed.App
 import com.adblocker.xposed.data.model.CaptureLog
 import java.text.SimpleDateFormat
@@ -111,9 +112,16 @@ class FloatingCaptureService : Service() {
         titleBar.addView(closeBtn)
 
         // Capture list
-        val scrollView = ScrollView(this).apply {
+        val scrollView = object : ScrollView(this) {
+            private val maxH = dpToPx(300)
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val hSpec = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) {
+                    MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.AT_MOST)
+                } else heightMeasureSpec
+                super.onMeasure(widthMeasureSpec, hSpec)
+            }
+        }.apply {
             id = android.R.id.content
-            maxHeight = dpToPx(300)
         }
 
         val captureList = LinearLayout(this).apply {
@@ -203,7 +211,7 @@ class FloatingCaptureService : Service() {
         // Also save to database
         try {
             val dao = App.instance.database.captureLogDao()
-            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            CoroutineScope(Dispatchers.IO).launch {
                 dao.insert(CaptureLog(
                     packageName = packageName,
                     url = url,
